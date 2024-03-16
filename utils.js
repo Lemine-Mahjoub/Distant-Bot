@@ -12,7 +12,6 @@ async function getSpotifyAccessToken(clientId, clientSecret) {
         },
       }
     );
-    console.log(response.data);
     return response.data.access_token;
   } catch (error) {
     console.error('Error fetching Spotify access token:', error);
@@ -27,19 +26,29 @@ async function getTrackDetailsFromSpotify(url, spotifyAccessToken) {
       'Authorization': `Bearer ${spotifyAccessToken}`,
     },
   });
-  return `${response.data.name} ${response.data.artists.map(artist => artist.name).join(', ')}`;
+  const trackDetails = {
+    artist: response.data.artists[0].name,
+    title: response.data.name,
+    album: response.data.album.name
+  };
+  return trackDetails;
 }
 
 async function getTrackDetailsFromYouTube(url, youtubeApiKey) {
-  const videoId = url.split('watch?v=')[1].split('&')[0];
-  const response = await axios.get(`https://www.googleapis.com/youtube/v3/videos`, {
+  const videoId = new URL(url).searchParams.get('v');
+  const response = await axios.get('https://www.googleapis.com/youtube/v3/videos', {
     params: {
       part: 'snippet',
       id: videoId,
       key: youtubeApiKey,
     },
   });
-  return response.data.items[0].snippet.title;
+  const trackDetails = {
+    artist: response.data.items[0].snippet.channelTitle,
+    title: response.data.items[0].snippet.title,
+    album: ''
+  };
+  return trackDetails;
 }
 
 async function getTrackDetailsFromDeezer(url) {
@@ -49,17 +58,11 @@ async function getTrackDetailsFromDeezer(url) {
       const fullPage = await axios.get(url);
       const urlExtractRegex = /https:\/\/www\.deezer\.com\/\w+\/track\/(\d+)/;
       const match = fullPage.data.match(urlExtractRegex);
-      if (match) {
-          trackId = match[1];
-      } else {
-          console.log('No track ID found in the HTML content');
-          return;
-      }
+      trackId = match[1];
   } else {
       // Case 2: URL is a full link
       trackId = url.split('track/')[1];
   }
-  console.log('TRACKID DEEZER=' + trackId);
   const response = await axios.get(`https://api.deezer.com/track/${trackId}`);
   const trackDetails = {
     artist: response.data.artist.name,
@@ -83,7 +86,7 @@ async function searchOnSpotify(trackDetails, spotifyAccessToken) {
   if (response.data.tracks.items.length > 0) {
     return `https://open.spotify.com/track/${response.data.tracks.items[0].id}`;
   }
-  return '';
+  return null;
 }
 
 async function searchOnYouTube(trackDetails, youtubeApiKey) {
@@ -99,23 +102,49 @@ async function searchOnYouTube(trackDetails, youtubeApiKey) {
   if (response.data.items.length > 0) {
     return `https://www.youtube.com/watch?v=${response.data.items[0].id.videoId}`;
   }
-  return '';
+  return null;
 }
 
 async function searchOnDeezer(trackDetails) {
+  const query = `artist:"${trackDetails.artist}" album:"${trackDetails.album}" track:"${trackDetails.title}"`;
   const response = await axios.get('https://api.deezer.com/search', {
     params: {
-      q: trackDetails,
+      q: query,
     },
   });
-  if (response.data.data.length > 0) {
+  if (response.data.data && response.data.data.length > 0) {
     return `https://www.deezer.com/track/${response.data.data[0].id}`;
   }
-  return '';
+  return null;
 }
 
 function getService(url) {
-  return new URL(url).hostname.replace('www.', '').split('.')[0].toLowerCase();
+  const hostname = new URL(url).hostname.replace('www.', '').split('.')[0].toLowerCase();
+  if (url.includes('spotify') && hostname === "open") { //to avoid getting "open" instead of spotify as a service
+    return 'spotify';
+  }
+  if (url.includes('tiktok') && hostname === "vm") { //to avoid getting "vm" instead of tiktok as a service
+    return 'tiktok';
+  }
+  if (url.includes('youtu.be') && hostname === 'youtu') { // to handle youtu.be links
+    return 'youtube';
+  }
+  return hostname;
+}
+
+async function getRidOfVmTiktok(url) {
+    const response = await axios.get(url);
+    const data = response.data;
+
+    const usernameRegex = /"uniqueId":"([^"]*)"/;
+    const usernameMatch = data.match(usernameRegex);
+    const username = usernameMatch ? usernameMatch[1] : null;
+
+    const videoIdRegex = /{"itemInfo":{"itemStruct":{"id":"([^"]*)"/;
+    const videoIdMatch = data.match(videoIdRegex);
+    const videoId = videoIdMatch ? videoIdMatch[1] : null;
+
+    return `https://www.tiktok.com/@${username}/video/${videoId}`;
 }
 
 module.exports = {
@@ -127,4 +156,5 @@ module.exports = {
   searchOnDeezer,
   searchOnYouTube,
   getService,
+  getRidOfVmTiktok,
 };

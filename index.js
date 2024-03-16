@@ -61,7 +61,13 @@ app.post('/interactions', verifyMiddleware, async (req, res) => {
             let videoType = '';
             switch (utils.getService(url) + '.') {
                 case 'instagram.': url = url.replace('instagram.', 'ddinstagram.'); videoType = 'Reel'; break;
-                case 'tiktok.': url = url.replace('tiktok.', 'vxtiktok.'); videoType = 'TikTok'; break;
+                case 'tiktok.':
+                    if(url.includes('vm.tiktok')){
+                        url = await utils.getRidOfVmTiktok(url);
+                    }
+                    url = url.replace('tiktok.', 'vxtiktok.');
+                    videoType = 'TikTok';
+                    break;
                 case 'twitter.': url = url.replace('twitter.', 'fxtwitter.'); videoType = 'X'; break;
                 case 'x.': url = url.replace('x.', 'fxtwitter.'); videoType = 'X'; break;
                 default: videoType = 'Video'; break;
@@ -90,51 +96,64 @@ app.post('/interactions', verifyMiddleware, async (req, res) => {
             let spotifyLink = '';
             let youtubeLink = '';
             let deezerLink = '';
-            /*if (service === 'spotify') {
-                query = await utils.getTrackDetailsFromSpotify(url, spotifyAccessToken);
+            let musicWord = 'Music';
+            let components = [];
+            if (service === 'spotify') {
+                trackDetails = await utils.getTrackDetailsFromSpotify(url, spotifyAccessToken);
                 spotifyLink = url;
-                console.log(query);
             } else if (service === 'youtube') {
-                query = await utils.getTrackDetailsFromYouTube(url, youtubeApiKey);
+                trackDetails = await utils.getTrackDetailsFromYouTube(url, youtubeApiKey);
                 youtubeLink = url;
-                console.log(query);
-            } else*/ if (service === 'deezer') {
+            } else if (service === 'deezer') {
                 trackDetails = await utils.getTrackDetailsFromDeezer(url);
                 deezerLink = url;
-                console.log(trackDetails);
             }
-            if (spotifyLink === '') {
-                spotifyLink = await utils.searchOnSpotify(trackDetails, spotifyAccessToken);
+            else {
+                return res.send({
+                    type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+                    data: {
+                        content: `This platform is not supported yet. Please use a valid music streaming service link.`,
+                        flags: 64
+                    }
+                });
             }
-            /*if (youtubeLink === '') {
-                youtubeLink = await utils.searchOnYouTube(trackDetails, youtubeApiKey);
+            [spotifyLink, youtubeLink, deezerLink] = await Promise.all([
+                spotifyLink === '' ? utils.searchOnSpotify(trackDetails, spotifyAccessToken) : Promise.resolve(spotifyLink),
+                youtubeLink === '' ? utils.searchOnYouTube(trackDetails, youtubeApiKey) : Promise.resolve(youtubeLink),
+                deezerLink === '' ? utils.searchOnDeezer(trackDetails) : Promise.resolve(deezerLink)
+            ]);
+            if (spotifyLink) {
+                components.push({
+                    type: 2,
+                    style: 5,
+                    label: 'Spotify',
+                    url: spotifyLink,
+                });
             }
-            if (deezerLink === '') {
-                deezerLink = await utils.searchOnDeezer(trackDetails);
-            }*/
-            console.log(spotifyLink);
+            if (youtubeLink) {
+                components.push({
+                    type: 2,
+                    style: 5,
+                    label: 'YouTube',
+                    url: youtubeLink,
+                });
+                musicWord = `[Music](${youtubeLink})`;
+            }
+            if (deezerLink) {
+                components.push({
+                    type: 2,
+                    style: 5,
+                    label: 'Deezer',
+                    url: deezerLink,
+                });
+            }
             return res.send({
                 type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
                 data: {
-                    content: `Music shared by <@${member.user.id}>:`,
+                    content: `${musicWord} shared by <@${member.user.id}>:\n${trackDetails.title} by ${trackDetails.artist}`,
                     components: [{
                         type: 1,
-                        components: [{
-                            type: 2,
-                            style: 5,
-                            label: 'Spotify',
-                            url: spotifyLink,
-                        }, /*{
-                            type: 2,
-                            style: 5,
-                            label: 'YouTube',
-                            url: youtubeLink,
-                        },*/ {
-                            type: 2,
-                            style: 5,
-                            label: 'Deezer',
-                            url: deezerLink,
-                        }]
+                        components: components
                     }]
                 }
             });
@@ -224,7 +243,6 @@ app.get('/register_commands', async (req, res) => {
     try {
         const response = await discordApi.get(`/applications/${process.env.APPLICATION_ID}/commands`);
         const commands = response.data;
-        console.log('Global commands:', commands);
     } catch (error) {
         console.error('Error getting global commands:', error);
     }
@@ -235,7 +253,6 @@ app.get('/register_commands', async (req, res) => {
         for (const command of commands) {
             await discordApi.delete(`/applications/${process.env.APPLICATION_ID}/commands/${command.id}`);
         }
-        console.log('Global commands have been deleted');
     } catch (error) {
         console.error('Error deleting global commands:', error);
     }
